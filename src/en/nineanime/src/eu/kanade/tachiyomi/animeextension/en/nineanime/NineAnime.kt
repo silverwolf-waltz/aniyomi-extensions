@@ -12,13 +12,14 @@ import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.util.asJsoup
-import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.CacheControl
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -31,7 +32,6 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
 
-@ExperimentalSerializationApi
 class NineAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override val name = "9anime"
@@ -64,7 +64,7 @@ class NineAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         title = element.select("a.name").text()
     }
 
-    override fun popularAnimeNextPageSelector(): String = "li"
+    override fun popularAnimeNextPageSelector(): String = "nav > ul.pagination > li > a[aria-label=pagination.next]"
 
     override fun episodeListRequest(anime: SAnime): Request {
         val id = client.newCall(GET(baseUrl + anime.url)).execute().asJsoup().selectFirst("div[data-id]").attr("data-id")
@@ -84,23 +84,41 @@ class NineAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         val episode = SEpisode.create()
         val epNum = element.attr("data-num")
         val ids = element.attr("data-ids")
+        val sub = element.attr("data-sub").toInt().toBoolean()
+        val dub = element.attr("data-dub").toInt().toBoolean()
         val vrf = encodeVrf(ids)
         episode.url = "/ajax/server/list/$ids?vrf=$vrf"
         episode.episode_number = epNum.toFloat()
+        val langPrefix = "[" + if (sub) { "Sub" } else { "" } + if (dub) { ",Dub" } else { "" } + "]"
         val name = element.parent()?.select("span.d-title")?.text().orEmpty()
         val namePrefix = "Episode $epNum"
-        episode.name = if (name.isNotEmpty() && name != namePrefix) {
-            "Episode $epNum: $name"
-        } else {
-            "Episode $epNum"
-        }
+        episode.name = "Episode $epNum" + if (sub || dub) {
+            ": $langPrefix"
+        } else { "" } + if (name.isNotEmpty() && name != namePrefix) {
+            " $name"
+        } else { "" }
         return episode
     }
+
+    private fun Int.toBoolean() = this == 1
 
     override fun videoListParse(response: Response): List<Video> {
         val responseObject = json.decodeFromString<JsonObject>(response.body!!.string())
         val document = Jsoup.parse(JSONUtil.unescape(responseObject["result"]!!.jsonPrimitive.content))
-        val sourceId = document.select("ul > li[data-sv-id=41]").attr("data-link-id")
+        val videoList = mutableListOf<Video>()
+
+        // Sub
+        document.select("div[data-type=sub] > ul > li[data-sv-id=41]")
+            .firstOrNull()?.attr("data-link-id")
+            ?.let { videoList.addAll(extractVideo(it, "Sub")) }
+        // Dub
+        document.select("div[data-type=dub] > ul > li[data-sv-id=41]")
+            .firstOrNull()?.attr("data-link-id")
+            ?.let { videoList.addAll(extractVideo(it, "Dub")) }
+        return videoList
+    }
+
+    private fun extractVideo(sourceId: String, lang: String): List<Video> {
         val vrf = encodeVrf(sourceId)
         val episodeBody = network.client.newCall(GET("$baseUrl/ajax/server/$sourceId?vrf=$vrf"))
             .execute().body!!.string()
@@ -121,7 +139,7 @@ class NineAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         val masterPlaylist = result.body!!.string()
         return masterPlaylist.substringAfter("#EXT-X-STREAM-INF:")
             .split("#EXT-X-STREAM-INF:").map {
-                val quality = it.substringAfter("RESOLUTION=").substringAfter("x").substringBefore("\n") + "p"
+                val quality = it.substringAfter("RESOLUTION=").substringAfter("x").substringBefore("\n") + "p $lang"
                 val videoUrl = masterUrl.substringBeforeLast("/") + "/" + it.substringAfter("\n").substringBefore("\n")
                 Video(videoUrl, quality, videoUrl, headers = headers)
             }
@@ -135,15 +153,28 @@ class NineAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override fun List<Video>.sort(): List<Video> {
         val quality = preferences.getString("preferred_quality", "1080")
-        if (quality != null) {
+        val lang = preferences.getString("preferred_language", "Sub")
+        if (quality != null && lang != null) {
             val newList = mutableListOf<Video>()
             var preferred = 0
             for (video in this) {
-                if (video.quality.contains(quality)) {
+                if (video.quality.contains(quality) && video.quality.contains(lang)) {
                     newList.add(preferred, video)
                     preferred++
                 } else {
                     newList.add(video)
+                }
+            }
+            // If dub is preferred language and anime do not have dub version, respect preferred quality
+            if (lang == "Dub" && newList.first().quality.contains("Dub").not()) {
+                newList.clear()
+                for (video in this) {
+                    if (video.quality.contains(quality)) {
+                        newList.add(preferred, video)
+                        preferred++
+                    } else {
+                        newList.add(video)
+                    }
                 }
             }
             return newList
@@ -151,17 +182,11 @@ class NineAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         return this
     }
 
-    override fun searchAnimeFromElement(element: Element): SAnime {
-        val anime = SAnime.create()
-        anime.setUrlWithoutDomain(baseUrl + element.select("a.name").attr("href"))
-        anime.thumbnail_url = element.select("div.poster img").attr("src")
-        anime.title = element.select("a.name").text()
-        return anime
-    }
+    override fun searchAnimeFromElement(element: Element): SAnime = popularAnimeFromElement(element)
 
-    override fun searchAnimeNextPageSelector(): String = "a.btn-primary.next:not(.disabled)"
+    override fun searchAnimeNextPageSelector(): String = popularAnimeNextPageSelector()
 
-    override fun searchAnimeSelector(): String = "div.ani.items > div"
+    override fun searchAnimeSelector(): String = popularAnimeSelector()
 
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
         val vrf = encodeVrf(query)
@@ -197,15 +222,13 @@ class NineAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         }
     }
 
-    override fun latestUpdatesNextPageSelector(): String = throw Exception("not used")
+    override fun latestUpdatesNextPageSelector(): String = popularAnimeNextPageSelector()
 
-    override fun latestUpdatesFromElement(element: Element) = throw Exception("not used")
+    override fun latestUpdatesFromElement(element: Element) = popularAnimeFromElement(element)
 
-    override fun latestUpdatesRequest(page: Int): Request = GET("$baseUrl/ajax/home/widget?name=updated_all&page=$page")
+    override fun latestUpdatesRequest(page: Int): Request = GET("$baseUrl/filter?sort=recently_updated&page=$page")
 
-    override fun latestUpdatesSelector(): String = throw Exception("not used")
-
-    override fun latestUpdatesParse(response: Response) = popularAnimeParse(response)
+    override fun latestUpdatesSelector(): String = popularAnimeSelector()
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         val domainPref = ListPreference(screen.context).apply {
@@ -238,13 +261,29 @@ class NineAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
                 preferences.edit().putString(key, entry).commit()
             }
         }
+        val videoLanguagePref = ListPreference(screen.context).apply {
+            key = "preferred_language"
+            title = "Preferred language"
+            entries = arrayOf("Sub", "Dub")
+            entryValues = arrayOf("Sub", "Dub")
+            setDefaultValue("Sub")
+            summary = "%s"
+
+            setOnPreferenceChangeListener { _, newValue ->
+                val selected = newValue as String
+                val index = findIndexOfValue(selected)
+                val entry = entryValues[index] as String
+                preferences.edit().putString(key, entry).commit()
+            }
+        }
         screen.addPreference(domainPref)
         screen.addPreference(videoQualityPref)
+        screen.addPreference(videoLanguagePref)
     }
 
-    private fun encodeVrf(id: String) = encode(encrypt(cipher(encode(id))).replace("""=+$""".toRegex(), ""))
+    private fun encodeVrf(id: String) = encode(encrypt(cipher(encode(id), cipherKey)))
 
-    private fun decodeVrf(text: String) = decode(cipher(decrypt(text)))
+    private fun decodeVrf(text: String) = decode(cipher(decrypt(text), decipherKey))
 
     private fun encrypt(input: String): String {
         if (input.any { it.code > 255 }) throw Exception("illegal characters!")
@@ -271,7 +310,7 @@ class NineAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         return output
     }
 
-    private fun cipher(input: String): String {
+    private fun cipher(input: String, cipherKey: String): String {
         val arr = IntArray(256) { it }
 
         var u = 0
@@ -333,7 +372,24 @@ class NineAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
     private fun encode(input: String): String = java.net.URLEncoder.encode(input, "utf-8").replace("+", "%20")
 
     private fun decode(input: String): String = java.net.URLDecoder.decode(input, "utf-8")
+
+    private val keys by lazy {
+        val allJsScript = runBlocking {
+            client.newCall(
+                GET(
+                    url = "https://s2.bunnycdn.ru/assets/_9anime/min/all.js",
+                    cache = CacheControl.FORCE_NETWORK
+                )
+            ).execute().body!!.string()
+        }
+        getKeys(allJsScript, json)
+    }
+    private val cipherKey by lazy {
+        keys.first
+    }
+    private val decipherKey by lazy {
+        keys.second
+    }
 }
 
 private const val nineAnimeKey = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-private const val cipherKey = "rTKp3auwu0ULA6II"
