@@ -42,7 +42,7 @@ class FASELHD : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override fun headersBuilder(): Headers.Builder {
         return super.headersBuilder()
-            .add("Referer", "https://www.faselhd.club/")
+            .add("Referer", baseUrl)
     }
 
     // Popular Anime
@@ -63,26 +63,42 @@ class FASELHD : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
     override fun popularAnimeNextPageSelector(): String = "ul.pagination li a.page-link:contains(›)"
 
     // Episodes
+    override fun episodeListSelector() = "div.epAll a"
 
     private fun seasonsNextPageSelector(seasonNumber: Int) = "div#seasonList div.col-xl-2:nth-child($seasonNumber)" // "div.List--Seasons--Episodes > a:nth-child($seasonNumber)"
 
     override fun episodeListParse(response: Response): List<SEpisode> {
         val episodes = mutableListOf<SEpisode>()
-
         var seasonNumber = 1
+        fun episodeExtract(element: Element): SEpisode {
+            val episode = SEpisode.create()
+            episode.setUrlWithoutDomain(element.select("span#liskSh").text())
+            episode.name = "مشاهدة"
+            return episode
+        }
         fun addEpisodes(document: Document) {
-            document.select(episodeListSelector()).map { episodes.add(episodeFromElement(it)) }
-            document.select(seasonsNextPageSelector(seasonNumber)).firstOrNull()?.let {
-                seasonNumber++
-                addEpisodes(client.newCall(GET("https://www.faselhd.club/?p=" + it.select("div.seasonDiv").attr("data-href"), headers)).execute().asJsoup())
+            if (document.select(episodeListSelector()).isNullOrEmpty())
+                document.select("div.shortLink").map { episodes.add(episodeExtract(it)) }
+            else {
+                document.select(episodeListSelector()).map { episodes.add(episodeFromElement(it)) }
+                document.select(seasonsNextPageSelector(seasonNumber)).firstOrNull()?.let {
+                    seasonNumber++
+                    addEpisodes(
+                        client.newCall(
+                            GET(
+                                "$baseUrl/?p=" + it.select("div.seasonDiv")
+                                    .attr("data-href"),
+                                headers
+                            )
+                        ).execute().asJsoup()
+                    )
+                }
             }
         }
 
         addEpisodes(response.asJsoup())
         return episodes.reversed()
     }
-
-    override fun episodeListSelector() = "div.epAll a"
 
     override fun episodeFromElement(element: Element): SEpisode {
         val episode = SEpisode.create()
@@ -92,29 +108,22 @@ class FASELHD : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         return episode
     }
 
-    // Video urls //test commit
+    // Video urls
+
+    override fun videoListSelector() = throw UnsupportedOperationException("Not used.")
 
     override fun videoListParse(response: Response): List<Video> {
         val document = response.asJsoup()
-        val iframe = document.selectFirst("iframe").attr("src")
-        val referer = response.request.url.toString()
-        val refererHeaders = Headers.headersOf("referer", referer)
-        val iframeResponse = client.newCall(GET(iframe, refererHeaders))
-            .execute().asJsoup()
-        return videosFromElement(iframeResponse.selectFirst(videoListSelector()), refererHeaders)
-    }
-
-    override fun videoListSelector() = "button.hd_btn:contains(auto)"
-
-    private fun videosFromElement(element: Element, headers: Headers): List<Video> {
-        // val masterUrl = element.data().substringAfter("setup({\"file\":\"").substringBefore("\"").replace("\\/", "/")
-        val masterUrl = element.attr("data-url")
-        val masterPlaylist = client.newCall(GET(masterUrl, headers)).execute().body!!.string()
+        val getSources = "master.m3u8"
+        val referer = Headers.headersOf("Referer", "$baseUrl/")
+        val iframe = document.selectFirst("iframe").attr("src").substringBefore("&img")
+        val webViewIncpec = client.newBuilder().addInterceptor(GetSourcesInterceptor(getSources, client)).build()
+        val lol = webViewIncpec.newCall(GET(iframe, referer)).execute().body!!.string()
         val videoList = mutableListOf<Video>()
-        masterPlaylist.substringAfter("#EXT-X-STREAM-INF:").split("#EXT-X-STREAM-INF:").forEach {
+        lol.substringAfter("#EXT-X-STREAM-INF:").split("#EXT-X-STREAM-INF:").forEach {
             val quality = it.substringAfter("RESOLUTION=").substringAfter("x").substringBefore(",") + "p"
             val videoUrl = it.substringAfter("\n").substringBefore("\n").replace("https", "http")
-            videoList.add(Video(videoUrl, quality, videoUrl, headers = headers))
+            videoList.add(Video(videoUrl, quality, videoUrl, headers = referer))
         }
         return videoList
     }
@@ -162,8 +171,8 @@ class FASELHD : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
             val url = "$baseUrl/".toHttpUrlOrNull()!!.newBuilder()
             filters.forEach { filter ->
                 when (filter) {
-
                     is GenreFilter -> url.addPathSegment(filter.toUriPart())
+                    else -> {}
                 }
             }
             url.addPathSegment("page")
@@ -226,6 +235,15 @@ class FASELHD : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
     private class GenreFilter(vals: Array<Pair<String, String>>) : UriPartFilter("تصنيف المسلسلات", vals)
 
     private fun getGenreList() = arrayOf(
+        Pair("افلام انمي", "anime-movies"),
+        Pair("جميع الافلام", "all-movies"),
+        Pair("جوائز الأوسكار لهذا العام⭐", "oscars-winners"),
+        Pair("افلام اجنبي", "movies"),
+        Pair("افلام مدبلجة", "dubbed-movies"),
+        Pair("افلام هندي", "hindi"),
+        Pair("افلام اسيوي", "asian-movies"),
+        Pair("الاعلي مشاهدة", "movies_top_views"),
+        Pair("الافلام الاعلي تقييما IMDB", "movies_top_imdb"),
         Pair("مسلسلات الأنمي", "anime"),
         Pair("جميع المسلسلات", "series"),
         Pair("الاعلي مشاهدة", "series_top_views"),

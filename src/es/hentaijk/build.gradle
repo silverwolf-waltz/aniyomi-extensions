@@ -10,4 +10,10 @@ ext {
     containsNsfw = true
 }
 
+dependencies {
+    implementation(project(':lib-fembed-extractor'))
+    implementation(project(':lib-okru-extractor'))
+}
+
+
 apply from: "$rootDir/common.gradle"

@@ -6,10 +6,6 @@ import android.widget.Toast
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.AppInfo
-import eu.kanade.tachiyomi.animeextension.en.dramacool.extractors.DoodExtractor
-import eu.kanade.tachiyomi.animeextension.en.dramacool.extractors.FembedExtractor
-import eu.kanade.tachiyomi.animeextension.en.dramacool.extractors.StreamSBExtractor
-import eu.kanade.tachiyomi.animeextension.en.dramacool.extractors.StreamTapeExtractor
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
@@ -17,6 +13,10 @@ import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
+import eu.kanade.tachiyomi.lib.doodextractor.DoodExtractor
+import eu.kanade.tachiyomi.lib.fembedextractor.FembedExtractor
+import eu.kanade.tachiyomi.lib.streamsbextractor.StreamSBExtractor
+import eu.kanade.tachiyomi.lib.streamtapeextractor.StreamTapeExtractor
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.OkHttpClient
@@ -70,7 +70,7 @@ class DramaCool : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         val episode = SEpisode.create()
         val epNum = element.select("h3").text().substringAfter("Episode ")
         episode.setUrlWithoutDomain(element.attr("abs:href"))
-        episode.name = element.select("span.type").text() + " Episode: " + element.select("h3").text().substringAfter("Episode ")
+        episode.name = element.select("span.type").text() + ": Episode " + element.select("h3").text().substringAfter("Episode ")
         episode.episode_number = when {
             (epNum.isNotEmpty()) -> epNum.toFloat()
             else -> 1F
@@ -99,22 +99,11 @@ class DramaCool : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         for (element in elements) {
             val url = element.attr("data-video")
             when {
-                url.contains("sbembed.com") || url.contains("sbembed1.com") || url.contains("sbplay.org") ||
-                    url.contains("sbvideo.net") || url.contains("streamsb.net") || url.contains("sbplay.one") ||
-                    url.contains("cloudemb.com") || url.contains("playersb.com") || url.contains("tubesb.com") ||
-                    url.contains("sbplay1.com") || url.contains("embedsb.com") || url.contains("watchsb.com") ||
-                    url.contains("sbplay2.com") || url.contains("japopav.tv") || url.contains("viewsb.com") ||
-                    url.contains("sbfast") || url.contains("sbfull.com") || url.contains("javplaya.com") ||
-                    url.contains("ssbstream.net") || url.contains("p1ayerjavseen.com") || url.contains("sbthe.com") ||
-                    url.contains("streamsss.net") || url.contains("sbplay2.xyz") // || url.contains("")
+                url.contains("sbplay2.com") || url.contains("japopav.tv") || url.contains("viewsb.com") ||
+                    url.contains("sbfast") || url.contains("sbfull.com") || url.contains("ssbstream.net") ||
+                    url.contains("p1ayerjavseen.com") || url.contains("streamsss.net") || url.contains("sbplay2.xyz")
                 -> {
-                    val headers = headers.newBuilder()
-                        .set("Referer", url)
-                        .set("User-Agent", "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:96.0) Gecko/20100101 Firefox/96.0")
-                        .set("Accept-Language", "en-US,en;q=0.5")
-                        .set("watchsb", "streamsb")
-                        .build()
-                    val videos = StreamSBExtractor(client).videosFromUrl(url, headers)
+                    val videos = StreamSBExtractor(client).videosFromUrl(url, headers, common = false)
                     videoList.addAll(videos)
                 }
 
@@ -125,29 +114,16 @@ class DramaCool : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
                     }
                 }
 
-                url.contains("fembed.com") ||
-                    url.contains("anime789.com") || url.contains("24hd.club") || url.contains("fembad.org") ||
-                    url.contains("vcdn.io") || url.contains("sharinglink.club") || url.contains("moviemaniac.org") ||
-                    url.contains("votrefiles.club") || url.contains("femoload.xyz") || url.contains("albavido.xyz") ||
-                    url.contains("feurl.com") || url.contains("dailyplanet.pw") || url.contains("ncdnstm.com") ||
-                    url.contains("jplayer.net") || url.contains("xstreamcdn.com") || url.contains("fembed-hd.com") ||
-                    url.contains("gcloud.live") || url.contains("vcdnplay.com") || url.contains("superplayxyz.club") ||
-                    url.contains("vidohd.com") || url.contains("vidsource.me") || url.contains("cinegrabber.com") ||
-                    url.contains("votrefile.xyz") || url.contains("zidiplay.com") || url.contains("ndrama.xyz") ||
-                    url.contains("fcdn.stream") || url.contains("mediashore.org") || url.contains("suzihaza.com") ||
-                    url.contains("there.to") || url.contains("femax20.com") || url.contains("javstream.top") ||
-                    url.contains("viplayer.cc") || url.contains("sexhd.co") || url.contains("fembed.net") ||
-                    url.contains("mrdhan.com") || url.contains("votrefilms.xyz") || url.contains("fembed9hd.com") ||
-                    url.contains("embedsito.com") || url.contains("dutrag.com") || // url.contains("") ||
-                    url.contains("youvideos.ru") || url.contains("streamm4u.club") || // url.contains("") ||
-                    url.contains("moviepl.xyz") || url.contains("asianclub.tv") || // url.contains("") ||
-                    url.contains("vidcloud.fun") || url.contains("fplayer.info") || // url.contains("") ||
-                    url.contains("diasfem.com") || url.contains("javpoll.com") // url.contains("")
-                -> {
-                    val videos = FembedExtractor().videosFromUrl(url)
-                    if (videos != null) {
-                        videoList.addAll(videos)
+                url.contains("streamtape") -> {
+                    val video = StreamTapeExtractor(client).videoFromUrl(url)
+                    if (video != null) {
+                        videoList.add(video)
                     }
+                }
+
+                url.contains("fembed") -> {
+                    val videos = FembedExtractor(client).videosFromUrl(url)
+                    videoList.addAll(videos)
                 }
 
                 url.contains("streamtape") -> {

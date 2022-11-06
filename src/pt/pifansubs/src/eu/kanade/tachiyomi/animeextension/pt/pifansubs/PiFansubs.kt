@@ -5,8 +5,9 @@ import android.content.SharedPreferences
 import android.net.Uri
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
+import eu.kanade.tachiyomi.animeextension.pt.pifansubs.extractors.AdoroDoramasExtractor
+import eu.kanade.tachiyomi.animeextension.pt.pifansubs.extractors.GdrivePlayerExtractor
 import eu.kanade.tachiyomi.animeextension.pt.pifansubs.extractors.JMVStreamExtractor
-import eu.kanade.tachiyomi.animeextension.pt.pifansubs.extractors.StreamSBExtractor
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
@@ -14,6 +15,7 @@ import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
+import eu.kanade.tachiyomi.lib.streamsbextractor.StreamSBExtractor
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.asObservableSuccess
 import eu.kanade.tachiyomi.util.asJsoup
@@ -34,7 +36,7 @@ class PiFansubs : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override val name = "Pi Fansubs"
 
-    override val baseUrl = "https://pifansubs.com"
+    override val baseUrl = "https://pifansubs.org"
 
     override val lang = "pt-BR"
 
@@ -108,21 +110,27 @@ class PiFansubs : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
     override fun videoListParse(response: Response): List<Video> {
         val document = response.asJsoup()
         val players = document.select("div.source-box:not(#source-player-trailer) iframe")
-        val videoList = mutableListOf<Video>()
-        players.forEach { player ->
-            val url = player.attr("data-src")
-            videoList.addAll(getPlayerVideos(url))
+        return players.flatMap { player ->
+            val url = player.attr("data-src").ifEmpty { player.attr("src") }.let {
+                if (!it.startsWith("http"))
+                    "https:" + it
+                else it
+            }
+            getPlayerVideos(url)
         }
-        return videoList
     }
 
     private fun getPlayerVideos(url: String): List<Video> {
-
+        val streamsbDomains = listOf("sbspeed", "sbanh", "streamsb", "sbfull")
         return when {
             "player.jmvstream" in url ->
-                JMVStreamExtractor(client).getVideoList(url)
-            "sbspeed.com" in url ->
-                StreamSBExtractor(client).videosFromUrl(url, headersBuilder().build())
+                JMVStreamExtractor(client).videosFromUrl(url)
+            "gdriveplayer." in url ->
+                GdrivePlayerExtractor(client).videosFromUrl(url)
+            streamsbDomains.any { it in url } ->
+                StreamSBExtractor(client).videosFromUrl(url, headers)
+            "adorodoramas.com" in url ->
+                AdoroDoramasExtractor(client).videosFromUrl(url)
             "/jwplayer/?source" in url -> {
                 val videoUrl = Uri.parse(url).getQueryParameter("source")!!
                 listOf(Video(videoUrl, "JWPlayer", videoUrl))
@@ -214,12 +222,12 @@ class PiFansubs : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         val doc = getRealDoc(document)
         val sheader = doc.selectFirst("div.sheader")
         val img = sheader.selectFirst("div.poster > img")
-        anime.thumbnail_url = img.attr("abs:data-src")
+        anime.thumbnail_url = img.attr("data-src")
         anime.title = sheader.selectFirst("div.data > h1").text()
         anime.genre = sheader.select("div.data > div.sgeneros > a")
             .joinToString(", ") { it.text() }
         val info = doc.selectFirst("div#info")
-        var description = info.selectFirst("p").text() + "\n"
+        var description = info.select("p").joinToString("\n\n") + "\n"
         info.getInfo("Título")?.let { description += "$it" }
         info.getInfo("Ano")?.let { description += "$it" }
         info.getInfo("Temporadas")?.let { description += "$it" }
@@ -274,9 +282,11 @@ class PiFansubs : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
     private fun Element.getInfo(substring: String): String? {
         val target = this.selectFirst("div.custom_fields:contains($substring)")
             ?: return null
-        val key = target.selectFirst("b").text()
-        val value = target.selectFirst("span").text()
-        return "\n$key: $value"
+        return runCatching {
+            val key = target.selectFirst("b").text()
+            val value = target.selectFirst("span").text()
+            "\n$key: $value"
+        }.getOrNull()
     }
 
     private fun String.toDate(): Long {

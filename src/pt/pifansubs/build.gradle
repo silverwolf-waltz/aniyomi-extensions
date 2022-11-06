@@ -5,9 +5,14 @@ ext {
     extName = 'Pi Fansubs'
     pkgNameSuffix = 'pt.pifansubs'
     extClass = '.PiFansubs'
-    extVersionCode = 2
+    extVersionCode = 5
     libVersion = '13'
     containsNsfw = true
+}
+
+dependencies {
+    implementation(project(':lib-streamsb-extractor'))
+    implementation "dev.datlag.jsunpacker:jsunpacker:1.0.1"
 }
 
 apply from: "$rootDir/common.gradle"
