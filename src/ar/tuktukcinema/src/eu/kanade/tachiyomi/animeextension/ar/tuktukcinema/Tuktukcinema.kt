@@ -15,11 +15,8 @@ import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
 import eu.kanade.tachiyomi.lib.doodextractor.DoodExtractor
-import eu.kanade.tachiyomi.lib.okruextractor.OkruExtractor
 import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.util.asJsoup
-import okhttp3.FormBody
 import okhttp3.Headers
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -32,7 +29,7 @@ import java.lang.Exception
 
 class Tuktukcinema : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
-    override val name = "تك تك سينما"
+    override val name = "توك توك سينما"
 
     override val baseUrl = "https://w.tuktukcinema.net"
 
@@ -61,81 +58,71 @@ class Tuktukcinema : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
     }
 
     private fun titleEdit(title: String, details: Boolean = false): String {
-        return if (Regex("فيلم (.*?) مترجم").containsMatchIn(title))
-            Regex("فيلم (.*?) مترجم").find(title)!!.groupValues[1] + " (فيلم)" // افلام اجنبيه مترجمه
-        else if (Regex("فيلم (.*?) مدبلج").containsMatchIn(title))
-            Regex("فيلم (.*?) مدبلج").find(title)!!.groupValues[1] + " (مدبلج)(فيلم)" // افلام اجنبيه مدبلجه
-        else if (Regex("فيلم ([^a-zA-Z]+) ([0-9]+)").containsMatchIn(title)) // افلام عربى
-            Regex("فيلم ([^a-zA-Z]+) ([0-9]+)").find(title)!!.groupValues[1] + " (فيلم)"
-        else if (title.contains("مسلسل")) {
-            if (title.contains("الموسم") and details) {
+        return if (title.contains("فيلم")) {
+            if (Regex("فيلم (.*?) مترجم").containsMatchIn(title)) {
+                Regex("فيلم (.*?) مترجم").find(title)!!.groupValues[1] + if (details) " (فيلم)" else "" // افلام اجنبيه مترجمه
+            } else if (Regex("فيلم (.*?) مدبلج").containsMatchIn(title)) {
+                Regex("فيلم (.*?) مدبلج").find(title)!!.groupValues[1] + if (details) " (مدبلج)(فيلم)" else "" // افلام اجنبيه مدبلجه
+            } else if (Regex("فيلم ([^a-zA-Z]+) ([0-9]+)").containsMatchIn(title)) {
+                // افلام عربى
+                Regex("فيلم ([^a-zA-Z]+) ([0-9]+)").find(title)!!.groupValues[1] + if (details) " (فيلم)" else ""
+            } else {
+                title
+            }
+        } else if (title.contains("مسلسل")) {
+            if (title.contains("الموسم")) {
                 val newTitle = Regex("مسلسل (.*?) الموسم (.*?) الحلقة ([0-9]+)").find(title)
-                return "${newTitle!!.groupValues[1]} (م.${newTitle.groupValues[2]})(${newTitle.groupValues[3]}ح)"
-            } else if (title.contains("الحلقة") and details) {
+                newTitle!!.groupValues[1] + if (details) " (م.${newTitle.groupValues[2]})(${newTitle.groupValues[3]}ح)" else ""
+            } else if (title.contains("الحلقة")) {
                 val newTitle = Regex("مسلسل (.*?) الحلقة ([0-9]+)").find(title)
-                return "${newTitle!!.groupValues[1]} (${newTitle.groupValues[2]}ح)"
-            } else Regex(if (title.contains("الموسم")) "مسلسل (.*?) الموسم" else "مسلسل (.*?) الحلقة").find(title)!!.groupValues[1] + " (مسلسل)"
-        } else if (title.contains("انمي"))
-            return Regex(if (title.contains("الموسم"))"انمي (.*?) الموسم" else "انمي (.*?) الحلقة").find(title)!!.groupValues[1] + " (انمى)"
-        else if (title.contains("برنامج"))
-            Regex(if (title.contains("الموسم"))"برنامج (.*?) الموسم" else "برنامج (.*?) الحلقة").find(title)!!.groupValues[1] + " (برنامج)"
-        else
+                newTitle!!.groupValues[1] + if (details) " (${newTitle.groupValues[2]}ح)" else ""
+            } else {
+                Regex(if (title.contains("الموسم")) "مسلسل (.*?) الموسم" else "مسلسل (.*?) الحلقة").find(title)!!.groupValues[1] + if (details) " (مسلسل)" else ""
+            }
+        } else if (title.contains("انمي")) {
+            return Regex(if (title.contains("الموسم"))"انمي (.*?) الموسم" else "انمي (.*?) الحلقة").find(title)!!.groupValues[1] + if (details) " (انمى)" else ""
+        } else if (title.contains("برنامج")) {
+            Regex(if (title.contains("الموسم"))"برنامج (.*?) الموسم" else "برنامج (.*?) الحلقة").find(title)!!.groupValues[1] + if (details) " (برنامج)" else ""
+        } else {
             title
+        }
     }
 
-    override fun popularAnimeNextPageSelector(): String = "div.paginate ul.page-numbers li.active + li a"
+    override fun popularAnimeNextPageSelector(): String = "div.pagination ul.page-numbers li a.next"
 
     // ============================ episodes ===============================
 
-    private fun seasonsNextPageSelector() = "div.seasons--toggler ul li"
+    private fun seasonsNextPageSelector() = "section.allseasonss div.Block--Item"
 
     override fun episodeListParse(response: Response): List<SEpisode> {
         val episodes = mutableListOf<SEpisode>()
-        fun addEpisodeNew(url: String, type: String, title: String = "") {
+        fun addEpisodeNew(url: String, title: String) {
             val episode = SEpisode.create()
             episode.setUrlWithoutDomain(url)
-            if (type == "movie")
-                episode.name = "مشاهدة"
-            else
-                episode.name = title
-
+            episode.name = title
             episodes.add(episode)
         }
         fun addEpisodes(response: Response) {
             val document = response.asJsoup()
             val url = response.request.url.toString()
-            if (document.select("div.episodes--side--list").isNullOrEmpty()) {
-                // Movies
-                addEpisodeNew(url, "movie")
+            if (document.select(seasonsNextPageSelector()).isNullOrEmpty()) {
+                addEpisodeNew(url, "مشاهدة")
             } else {
-                // Series
-                // look for what is wrong
-                document.select(seasonsNextPageSelector()).forEach { season ->
-                    val seasonNum = season.text()
-                    if (season.hasClass("active")) {
-                        // get episodes from page
-                        document.select("div.episodes--list--side a").forEach { ep ->
+                document.select(seasonsNextPageSelector()).reversed().forEach { season ->
+                    val seasonNum = season.select("h3").text()
+                    (
+                        if (seasonNum == document.selectFirst("div#mpbreadcrumbs a span:contains(الموسم)")!!.text()) {
+                            document
+                        } else {
+                            client.newCall(GET(season.selectFirst("a")!!.attr("href"))).execute().asJsoup()
+                        }
+                        )
+                        .select("section.allepcont a").forEach { episode ->
                             addEpisodeNew(
-                                ep.attr("href"),
-                                "series",
-                                seasonNum + " " + ep.text()
+                                episode.attr("href") + "watch/",
+                                seasonNum + " : الحلقة " + episode.select("div.epnum").text().filter { it.isDigit() },
                             )
                         }
-                    } else {
-                        // send request to get episodes
-                        val seasonData = season.attr("data-season")
-                        val postId = season.attr("data-id")
-                        val refererHeaders = Headers.headersOf("referer", response.request.url.toString(), "x-requested-with", "XMLHttpRequest")
-                        val requestBody = FormBody.Builder().add("season", seasonData).add("post_id", postId).build()
-                        val getEpisodes = client.newCall(POST("$baseUrl/wp-content/themes/Elshaikh/Inc/Ajax/Single/Episodes.php", refererHeaders, requestBody)).execute().asJsoup()
-                        getEpisodes.select("li a").forEach { ep ->
-                            addEpisodeNew(
-                                ep.attr("href"),
-                                "series",
-                                seasonNum + " " + ep.text()
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -160,10 +147,10 @@ class Tuktukcinema : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
                 val refererHeaders = Headers.headersOf("referer", response.request.url.toString())
                 val videosFromURL = MoshahdaExtractor(client).videosFromUrl(link, refererHeaders)
                 videos.addAll(videosFromURL)
-            } else if (link.contains("ok")) {
+            } /*else if (link.contains("ok")) {
                 val videosFromURL = OkruExtractor(client).videosFromUrl(link)
                 videos.addAll(videosFromURL)
-            } else if (server.text().contains("vidbom", ignoreCase = true) or server.text().contains("vidshare", ignoreCase = true)) {
+            }*/ else if (server.text().contains("vidbom", ignoreCase = true) or server.text().contains("vidshare", ignoreCase = true)) {
                 val videosFromURL = VidBomExtractor(client).videosFromUrl(link)
                 videos.addAll(videosFromURL)
             } else if (server.text().contains("dood", ignoreCase = true)) {
@@ -203,7 +190,7 @@ class Tuktukcinema : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override fun searchAnimeSelector(): String = "div.Block--Item"
 
-    override fun searchAnimeNextPageSelector(): String = "div.paginate ul.page-numbers li.next a"
+    override fun searchAnimeNextPageSelector(): String = "div.pagination ul.page-numbers li a.next"
 
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
         val url = if (query.isNotBlank()) {
@@ -229,8 +216,8 @@ class Tuktukcinema : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override fun searchAnimeFromElement(element: Element): SAnime {
         val anime = SAnime.create()
-        anime.title = titleEdit(element.select("a").attr("title"), true).trim()
-        anime.thumbnail_url = element.select("img").attr("data-src")
+        anime.title = titleEdit(element.select("h3").text(), true).trim()
+        anime.thumbnail_url = element.select("img").attr(if (element.ownerDocument()!!.location().contains("?s="))"src" else "data-src")
         anime.setUrlWithoutDomain(element.select("a").attr("href") + "watch/")
         return anime
     }
@@ -239,12 +226,12 @@ class Tuktukcinema : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override fun animeDetailsParse(document: Document): SAnime {
         val anime = SAnime.create()
-        val info = client.newCall(GET(document.select(episodeListSelector()).attr("href").replace("watch/", ""))).execute().asJsoup()
-        anime.genre = info.select("div.catssection li a").joinToString(", ") { it.text() }
-        anime.title = titleEdit(info.select("h1.post-title").text()).trim()
-        anime.author = info.select("ul.RightTaxContent li:contains(دولة) a").text()
-        anime.description = info.select("div.story").text().trim()
+        anime.genre = document.select("div.catssection li a").joinToString(", ") { it.text() }
+        anime.title = titleEdit(document.select("h1.post-title").text()).trim()
+        anime.author = document.select("ul.RightTaxContent li:contains(دولة) a").text()
+        anime.description = document.select("div.story").text().trim()
         anime.status = SAnime.COMPLETED
+        anime.thumbnail_url = document.select("div.left div.image img").attr("src")
         return anime
     }
 
@@ -252,7 +239,7 @@ class Tuktukcinema : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override fun latestUpdatesSelector(): String = "div.Block--Item"
 
-    override fun latestUpdatesNextPageSelector(): String = "div.paginate ul.page-numbers li.next a"
+    override fun latestUpdatesNextPageSelector(): String = "div.pagination ul.page-numbers li a.next"
 
     override fun latestUpdatesRequest(page: Int): Request = GET("$baseUrl/recent/page/$page/")
 
@@ -285,16 +272,11 @@ class Tuktukcinema : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         CatUnit("افلام اسيويه", "category/movies-33/افلام-اسيوي/"),
         CatUnit("افلام هنديه", "category/movies-33/افلام-هندى/"),
         CatUnit("كل المسسلسلات", "category/series-9/"),
-        CatUnit("مسلسلات اجنبى", "sercat/مسلسلات-اجنبي/"),
-        CatUnit("جديد مسلسلات اجنبى", "category/series-9/مسلسلات-اجنبي/"),
-        CatUnit("مسلسلات انمى", "sercat/قائمة-الانمي/"),
-        CatUnit("جديد مسلسلات انمى", "category/anime-6/انمي-مترجم/"),
-        CatUnit("مسلسلات تركى", "sercat/مسلسلات-تركي/"),
-        CatUnit("جديد مسلسلات تركى", "category/series-9/مسلسلات-تركي/"),
-        CatUnit("مسلسلات اسيوى", "sercat/مسلسلات-أسيوي/"),
-        CatUnit("جديد مسلسلات اسيوى", "category/series-9/مسلسلات-أسيوي/"),
-        CatUnit("مسلسلات هندى", "sercat/مسلسلات-هندي/"),
-        CatUnit("جديد مسلسلات هندى", "category/series-9/مسلسلات-هندي/")
+        CatUnit("مسلسلات اجنبى", "category/series-9/مسلسلات-اجنبي/"),
+        CatUnit("مسلسلات انمى", "category/anime-6/انمي-مترجم/"),
+        CatUnit("مسلسلات تركى", "category/series-9/مسلسلات-تركي/"),
+        CatUnit("مسلسلات اسيوى", "category/series-9/مسلسلات-أسيوي/"),
+        CatUnit("مسلسلات هندى", "category/series-9/مسلسلات-هندي/"),
     )
 
     // preferred quality settings

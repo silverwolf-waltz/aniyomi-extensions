@@ -96,7 +96,7 @@ class ANIMEWORLD : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         val elements = document.select(videoListSelector())
         for (element in elements) {
             val url = element.attr("href")
-            val location = element.ownerDocument().location()
+            val location = element.ownerDocument()!!.location()
             val videoHeaders = Headers.headersOf("Referer", location)
             when {
                 url.contains("animeworld.biz") || url.contains("sbembed.com") || url.contains("sbembed1.com") || url.contains("sbplay.org") ||
@@ -112,7 +112,7 @@ class ANIMEWORLD : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
                 }
                 url.contains("streamingaw") -> {
                     videoList.add(
-                        Video(url, "AnimeWorld Server", url)
+                        Video(url, "AnimeWorld Server", url),
                     )
                 }
                 url.contains("dood") -> {
@@ -175,12 +175,13 @@ class ANIMEWORLD : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override fun animeDetailsParse(document: Document): SAnime {
         val anime = SAnime.create()
-        anime.thumbnail_url = document.select("div.thumb img").first().attr("src")
+        anime.thumbnail_url = document.selectFirst("div.thumb img")!!.attr("src")
         anime.title = document.select("div.c1 h2.title").text()
-        anime.genre = document.select("dd:has(a[href*=language]) a, dd:has(a[href*=genre]) a").joinToString(", ") { it.text() }
+        val dl = document.select("div.info dl")
+        anime.genre = dl.select("dd:has(a[href*=language]) a, dd:has(a[href*=genre]) a").joinToString(", ") { it.text() }
         anime.description = document.select("div.desc").text()
-        anime.author = document.select("dd:has(a[href*=studio]) a").joinToString(", ") { it.text() }
-        anime.status = parseStatus(document.select("dd:has(a[href*=status]) a").text().replace("Status: ", ""))
+        anime.author = dl.select("dd:has(a[href*=studio]) a").joinToString(", ") { it.text() }
+        anime.status = parseStatus(dl.select("dd:has(a[href*=status]) a").text().replace("Status: ", ""))
         return anime
     }
 
@@ -248,7 +249,7 @@ class ANIMEWORLD : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         Genre("40", "Vampiri"),
         Genre("48", "Veicoli"),
         Genre("41", "Yaoi"),
-        Genre("42", "Yuri")
+        Genre("42", "Yuri"),
     )
 
     internal class Season(val id: String, name: String) : AnimeFilter.CheckBox(name)
@@ -316,7 +317,7 @@ class ANIMEWORLD : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         Year("2019"),
         Year("2020"),
         Year("2021"),
-        Year("2022")
+        Year("2022"),
     )
 
     internal class Type(val id: String, name: String) : AnimeFilter.CheckBox(name)
@@ -327,7 +328,7 @@ class ANIMEWORLD : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         Type("1", "OVA"),
         Type("2", "ONA"),
         Type("3", "Special"),
-        Type("5", "Music")
+        Type("5", "Music"),
     )
 
     internal class State(val id: String, name: String) : AnimeFilter.CheckBox(name)
@@ -336,7 +337,7 @@ class ANIMEWORLD : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         State("0", "In corso"),
         State("1", "Finito"),
         State("2", "Non rilasciato"),
-        State("3", "Droppato")
+        State("3", "Droppato"),
     )
 
     internal class Studio(val input: String, name: String) : AnimeFilter.Text(name)
@@ -345,7 +346,7 @@ class ANIMEWORLD : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
     private class SubList(subs: List<Sub>) : AnimeFilter.Group<Sub>("Sottotitoli", subs)
     private fun getSubs() = listOf(
         Sub("0", "Subbato"),
-        Sub("1", "Doppiato")
+        Sub("1", "Doppiato"),
     )
 
     internal class Audio(val id: String, name: String) : AnimeFilter.CheckBox(name)
@@ -368,9 +369,9 @@ class ANIMEWORLD : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
                 "Lista Z-A",
                 "Più Vecchi",
                 "Più Recenti",
-                "Più Visti"
+                "Più Visti",
             ),
-            0
+            0,
         )
 
     private fun getSearchParameters(filters: AnimeFilterList): String {
@@ -464,7 +465,7 @@ class ANIMEWORLD : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         Studio("", "Studio"),
         SubList(getSubs()),
         AudioList(getAudios()),
-        OrderFilter()
+        OrderFilter(),
     )
 
     // Preferences

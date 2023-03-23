@@ -9,11 +9,11 @@ import javax.crypto.spec.SecretKeySpec
 
 object Decryptor {
 
-    fun decrypt(encodedData: String, js: String): String? {
+    fun decrypt(encodedData: String, remoteKey: String): String? {
         val saltedData = Base64.decode(encodedData, Base64.DEFAULT)
         val salt = saltedData.copyOfRange(8, 16)
         val ciphertext = saltedData.copyOfRange(16, saltedData.size)
-        val password = FindPassword.getPassword(js).toByteArray()
+        val password = remoteKey.toByteArray()
         val (key, iv) = GenerateKeyAndIv(password, salt) ?: return null
         val keySpec = SecretKeySpec(key, "AES")
         val ivSpec = IvParameterSpec(iv)
@@ -30,9 +30,8 @@ object Decryptor {
         hashAlgorithm: String = "MD5",
         keyLength: Int = 32,
         ivLength: Int = 16,
-        iterations: Int = 1
+        iterations: Int = 1,
     ): List<ByteArray>? {
-
         val md = MessageDigest.getInstance(hashAlgorithm)
         val digestLength = md.getDigestLength()
         val targetKeySize = keyLength + ivLength
@@ -44,12 +43,13 @@ object Decryptor {
             md.reset()
 
             while (generatedLength < targetKeySize) {
-                if (generatedLength > 0)
+                if (generatedLength > 0) {
                     md.update(
                         generatedData,
                         generatedLength - digestLength,
-                        digestLength
+                        digestLength,
                     )
+                }
 
                 md.update(password)
                 md.update(salt, 0, 8)
@@ -64,7 +64,7 @@ object Decryptor {
             }
             val result = listOf(
                 generatedData.copyOfRange(0, keyLength),
-                generatedData.copyOfRange(keyLength, targetKeySize)
+                generatedData.copyOfRange(keyLength, targetKeySize),
             )
             return result
         } catch (e: DigestException) {

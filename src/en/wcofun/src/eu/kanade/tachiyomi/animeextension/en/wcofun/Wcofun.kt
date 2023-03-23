@@ -6,7 +6,6 @@ import android.util.Base64
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
-import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
@@ -31,12 +30,13 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
 import java.lang.Exception
+import java.net.URI
 
 class Wcofun : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override val name = "Wcofun"
 
-    override val baseUrl = "https://www.wcofun.net"
+    override val baseUrl by lazy { preferences.getString("preferred_domain", "https://www.wcofun.com")!! }
 
     override val lang = "en"
 
@@ -53,7 +53,7 @@ class Wcofun : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
     override fun popularAnimeSelector(): String = "#sidebar_right2 ul.items li"
 
     override fun popularAnimeRequest(page: Int): Request {
-        val interceptor = client.newBuilder().addInterceptor(RedirectInterceptor()).build()
+        val interceptor = client.newBuilder().addInterceptor(RedirectInterceptor(baseUrl)).build()
         val headers = interceptor.newCall(GET(baseUrl)).execute().request.headers
         return GET(baseUrl, headers = headers)
     }
@@ -104,7 +104,7 @@ class Wcofun : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
     }
 
     private fun videosFromElement(document: Document): List<Video> {
-        val scriptData = document.select("script:containsData( = \"\"; var )").first().data()
+        val scriptData = document.selectFirst("script:containsData( = \"\"; var )")!!.data()
 
         val numberRegex = """(?<=\.replace\(/\\D/g,''\)\) - )\d+""".toRegex()
         val subtractionNumber = numberRegex.find(scriptData)!!.value.toInt()
@@ -118,26 +118,35 @@ class Wcofun : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
         val iframeLink = Jsoup.parse(html).select("div.pcat-jwplayer iframe")
             .attr("src")
+
+        val iframeDomain = "https://" + URI(iframeLink).host
+
         val playerHtml = client.newCall(
             GET(
-                url = baseUrl + iframeLink,
-                headers = Headers.headersOf("Referer", document.location())
-            )
-        ).execute().body!!.string()
+                url = iframeLink,
+                headers = Headers.headersOf("Referer", document.location()),
+            ),
+        ).execute().body.string()
 
         val getVideoLink = playerHtml.substringAfter("\$.getJSON(\"").substringBefore("\"")
+
+        val head = Headers.Builder()
+        head.add("x-requested-with", "XMLHttpRequest")
+        head.add("Referer", (iframeDomain + getVideoLink))
+
         val videoJson = json.decodeFromString<JsonObject>(
             client.newCall(
                 GET(
-                    url = baseUrl + getVideoLink,
-                    headers = Headers.headersOf("x-requested-with", "XMLHttpRequest")
-                )
-            ).execute().body!!.string()
+                    url = (iframeDomain + getVideoLink),
+                    headers = head.build(),
+                ),
+            ).execute().body.string(),
         )
 
         val server = videoJson["server"]!!.jsonPrimitive.content
         val hd = videoJson["hd"]?.jsonPrimitive?.content
         val sd = videoJson["enc"]?.jsonPrimitive?.content
+        val fhd = videoJson["fhd"]?.jsonPrimitive?.content
         val videoList = mutableListOf<Video>()
         hd?.let {
             if (it.isNotEmpty()) {
@@ -149,6 +158,13 @@ class Wcofun : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
             if (it.isNotEmpty()) {
                 val videoUrl = "$server/getvid?evid=$it"
                 videoList.add(Video(videoUrl, "SD", videoUrl))
+            }
+        }
+
+        fhd?.let {
+            if (it.isNotEmpty()) {
+                val videoUrl = "$server/getvid?evid=$it"
+                videoList.add(Video(videoUrl, "FHD", videoUrl))
             }
         }
         return videoList
@@ -201,9 +217,9 @@ class Wcofun : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override fun animeDetailsParse(document: Document): SAnime {
         val anime = SAnime.create()
-        anime.title = document.select("div.video-title a").first().text()
+        anime.title = document.selectFirst("div.video-title a")!!.text()
         anime.description = document.select("div#sidebar_cat p")?.first()?.text()
-        anime.thumbnail_url = "https:${document.select("div#sidebar_cat img").first().attr("src")}"
+        anime.thumbnail_url = "https:${document.selectFirst("div#sidebar_cat img")!!.attr("src")}"
         anime.genre = document.select("div#sidebar_cat > a").joinToString { it.text() }
         return anime
     }
@@ -217,6 +233,21 @@ class Wcofun : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
     override fun latestUpdatesSelector(): String = throw Exception("Not used")
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        val domainPref = ListPreference(screen.context).apply {
+            key = "preferred_domain"
+            title = "Preferred domain (requires app restart)"
+            entries = arrayOf("www.wcofun.com", "www.wcofun.net", "www.wcofun.tv")
+            entryValues = arrayOf("https://www.wcofun.com", "https://www.wcofun.net", "https://www.wcofun.tv")
+            setDefaultValue("https://www.wcofun.com")
+            summary = "%s"
+
+            setOnPreferenceChangeListener { _, newValue ->
+                val selected = newValue as String
+                val index = findIndexOfValue(selected)
+                val entry = entryValues[index] as String
+                preferences.edit().putString(key, entry).commit()
+            }
+        }
         val videoQualityPref = ListPreference(screen.context).apply {
             key = "preferred_quality"
             title = "Preferred quality"
@@ -232,6 +263,7 @@ class Wcofun : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
                 preferences.edit().putString(key, entry).commit()
             }
         }
+        screen.addPreference(domainPref)
         screen.addPreference(videoQualityPref)
     }
 }

@@ -29,13 +29,13 @@ import org.jsoup.nodes.Element
 import org.jsoup.select.Elements
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
-import java.lang.Exception
+import kotlin.Exception
 
 class Movizland : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override val name = "موفيزلاند"
 
-    override val baseUrl = "https://watch.movizland.cyou"
+    override val baseUrl = "https://movizland.icu"
 
     override val lang = "ar"
 
@@ -47,45 +47,24 @@ class Movizland : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
     }
 
-    // Popular
-    private fun titleEdit(title: String, details: Boolean = false): String {
-        return if (Regex("فيلم (.*?) مترجم").containsMatchIn(title))
-            Regex("فيلم (.*?) مترجم").find(title)!!.groupValues[1] + " (فيلم)" // افلام اجنبيه مترجمه
-        else if (Regex("فيلم (.*?) مدبلج").containsMatchIn(title))
-            Regex("فيلم (.*?) مدبلج").find(title)!!.groupValues[1] + " (مدبلج)(فيلم)" // افلام اجنبيه مدبلجه
-        else if (Regex("فيلم ([^a-zA-Z]+) ([0-9]+)").containsMatchIn(title)) // افلام عربى
-            Regex("فيلم ([^a-zA-Z]+) ([0-9]+)").find(title)!!.groupValues[1] + " (فيلم)"
-        else if (title.contains("مسلسل")) {
-            if (title.contains("الموسم") and details) {
-                val newTitle = Regex("مسلسل (.*?) الموسم (.*?) الحلقة ([0-9]+)").find(title)
-                "${newTitle!!.groupValues[1]} (م.${newTitle.groupValues[2]})(${newTitle.groupValues[3]}ح)"
-            } else if (title.contains("الحلقة")and details) {
-                val newTitle = Regex("مسلسل (.*?) الحلقة ([0-9]+)").find(title)
-                "${newTitle!!.groupValues[1]} (${newTitle.groupValues[2]}ح)"
-            } else Regex(if (title.contains("الموسم")) "مسلسل (.*?) الموسم" else "مسلسل (.*?) الحلقة").find(title)!!.groupValues[1] + " (مسلسل)"
-        } else if (title.contains("انمي"))
-            return Regex(if (title.contains("الموسم"))"انمي (.*?) الموسم" else "انمي (.*?) الحلقة").find(title)!!.groupValues[1] + " (انمى)"
-        else if (title.contains("برنامج"))
-            Regex(if (title.contains("الموسم"))"برنامج (.*?) الموسم" else "برنامج (.*?) الحلقة").find(title)!!.groupValues[1] + " (برنامج)"
-        else
-            title
-    }
+    // ============================= popular =============================
 
-    override fun popularAnimeSelector(): String = "div.BlockItem"
+    override fun popularAnimeSelector(): String = "div.BlockItem a"
 
     override fun popularAnimeRequest(page: Int): Request = GET("$baseUrl/page/$page/")
 
     override fun popularAnimeFromElement(element: Element): SAnime {
         val anime = SAnime.create()
-        anime.thumbnail_url = element.select("a div.BlockImageItem img").attr("data-src")
-        anime.setUrlWithoutDomain(element.select("a").attr("href"))
-        anime.title = titleEdit(element.select("a div.BlockImageItem img").attr("alt"))
+        anime.thumbnail_url = element.select("div.BlockImageItem img").attr("data-src")
+        anime.setUrlWithoutDomain(element.attr("href"))
+        anime.title = titleEdit(element.select("div.BlockImageItem img").attr("alt"), true)
         return anime
     }
 
     override fun popularAnimeNextPageSelector(): String = "div.pagination li a.next"
 
-    // episodes
+    // ============================= episodes =============================
+
     private fun seasonsNextPageSelector() = "div.BlockItem a"
 
     override fun episodeListParse(response: Response): List<SEpisode> {
@@ -94,18 +73,17 @@ class Movizland : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         fun addEpisodeNew(url: String, type: String, title: String = "") {
             val episode = SEpisode.create()
             episode.setUrlWithoutDomain(url)
-            if (type == "assembly")
+            if (type == "assembly") {
                 episode.name = title.replace("فيلم", "").trim()
-            else if (type == "movie")
-                episode.name = "watch"
-            else if (Regex("الموسم (.*)").containsMatchIn(title))
-                episode.name = Regex("الموسم (.*)").find(title)!!.value.replace("مترجمة", "").replace("والاخيرة", "").trim()
-            else if (Regex("الحلقة (.*)").containsMatchIn(title))
-                episode.name = Regex("الحلقة (.*)").find(title)!!.value.replace("مترجمة", "").replace("والاخيرة", "").trim()
-            else if (Regex("حلقة (.*)").containsMatchIn(title))
-                episode.name = Regex("حلقة (.*)").find(title)!!.value.replace("مترجمة", "").replace("والاخيرة", "").trim()
-            else
+            } else if (type == "movie") {
+                episode.name = "مشاهدة"
+            } else if (TitleRegex.SEASON.containsMatchIn(title)) {
+                episode.name = TitleRegex.SEASON.find(title)!!.value.replace("مترجمة", "").replace("والاخيرة", "").trim()
+            } else if (TitleRegex.EPISODE.containsMatchIn(title)) {
+                episode.name = TitleRegex.EPISODE.find(title)!!.value.replace("مترجمة", "").replace("والاخيرة", "").trim()
+            } else {
                 episode.name = title
+            }
 
             episodes.add(episode)
         }
@@ -169,11 +147,12 @@ class Movizland : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
                         addEpisodeNew(
                             episode.select("a").attr("href"),
                             "series",
-                            document.select("div.SeriesSingle h2 span a").text() + " " + episode.select("a").text()
+                            document.select("div.SeriesSingle h2 span a").text() + " " + episode.select("a").text(),
                         )
                     }
-                    if (count == 0)
+                    if (count == 0) {
                         addEpisodeNew(url, "movie")
+                    }
                 }
             }
         }
@@ -187,7 +166,7 @@ class Movizland : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override fun episodeFromElement(element: Element): SEpisode = throw Exception("not used")
 
-    // Video links
+    // ============================= video links =============================
 
     override fun videoListParse(response: Response): List<Video> {
         val videos = mutableListOf<Video>()
@@ -217,24 +196,6 @@ class Movizland : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override fun videoListSelector() = "body"
 
-    private fun videosFromElement(element: Element): List<Video> {
-        val videoList = mutableListOf<Video>()
-        val qualityMap = mapOf("l" to "240p", "n" to "360p", "h" to "480p", "x" to "720p", "o" to "1080p")
-        val data = element.data().substringAfter(", file: \"").substringBefore("\"}],")
-        val url = Regex("(.*)_,(.*),\\.urlset/master(.*)").find(data)
-        val sources = url!!.groupValues[2].split(",")
-        for (quality in sources) {
-            val src = url.groupValues[1] + "_" + quality + "/index-v1-a1" + url.groupValues[3]
-            val video = qualityMap[quality]?.let {
-                Video(src, it, src)
-            }
-            if (video != null) {
-                videoList.add(video)
-            }
-        }
-        return videoList
-    }
-
     override fun List<Video>.sort(): List<Video> {
         val quality = preferences.getString("preferred_quality", null)
         if (quality != null) {
@@ -257,14 +218,16 @@ class Movizland : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override fun videoFromElement(element: Element) = throw Exception("not used")
 
-    // Search
+    // ============================= search =============================
 
     override fun searchAnimeFromElement(element: Element): SAnime {
         val anime = SAnime.create()
         val title = titleEdit(element.select("a div.BlockImageItem div.BlockTitle").text(), true)
         anime.thumbnail_url = element.select("a div.BlockImageItem img").attr("src")
-        if (anime.thumbnail_url.isNullOrEmpty()) anime.thumbnail_url =
-            element.select("a div.BlockImageItem img").attr("data-src")
+        if (anime.thumbnail_url.isNullOrEmpty()) {
+            anime.thumbnail_url =
+                element.select("a div.BlockImageItem img").attr("data-src")
+        }
         anime.setUrlWithoutDomain(element.select("a").attr("href"))
         anime.title = title
         return anime
@@ -275,11 +238,8 @@ class Movizland : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
     override fun searchAnimeSelector(): String = "div.BlocksInner div.BlocksUI div.BlockItem, div.BoxOfficeOtherSide div.BlocksUI div.BlockItem"
 
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
-        var newQuery = query
-        if (Regex("(.*)\\(").containsMatchIn(query))
-            newQuery = Regex("(.*)\\(").find(query)!!.groupValues[1].replace("(", "")
         val url = if (query.isNotBlank()) {
-            "$baseUrl/page/$page/?s=$newQuery"
+            "$baseUrl/page/$page/?s=$query"
         } else {
             (if (filters.isEmpty()) getFilterList() else filters).forEach { filter ->
                 when (filter) {
@@ -298,21 +258,24 @@ class Movizland : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         return GET(url, headers)
     }
 
-    // Anime Details
+    // ============================= anime details =============================
 
     override fun animeDetailsParse(document: Document): SAnime {
         val anime = SAnime.create()
         // div.CoverSingle div.CoverSingleContent
         anime.genre = document.select("div.SingleDetails li:contains(النوع) a,div.SingleDetails li:contains(الجودة) a").joinToString(", ") { it.text() }
-        anime.title = if (document.select("h2.postTitle").isNullOrEmpty())
-            titleEdit(document.select("div.H1Title h1").text()) else titleEdit(document.select("h2.postTitle").text())
+        anime.title = if (document.select("h2.postTitle").isNullOrEmpty()) {
+            titleEdit(document.select("div.H1Title h1").text())
+        } else {
+            titleEdit(document.select("h2.postTitle").text())
+        }
         anime.author = document.select("div.SingleDetails li:contains(دولة) a").text()
         anime.description = document.select("div.ServersEmbeds section.story").text().replace(document.select("meta[property=og:title]").attr("content"), "").replace(":", "").trim()
         anime.status = SAnime.COMPLETED
         return anime
     }
 
-    // Latest
+    // ============================= latest =============================
 
     override fun latestUpdatesNextPageSelector(): String = throw Exception("Not used")
 
@@ -322,7 +285,7 @@ class Movizland : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override fun latestUpdatesSelector(): String = throw Exception("Not used")
 
-    // Filters
+    // ============================= filters =============================
 
     override fun getFilterList() = AnimeFilterList(
         AnimeFilter.Header("الفلترات مش هتشتغل لو بتبحث او وهي فاضيه"),
@@ -351,10 +314,52 @@ class Movizland : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         CatUnit("مسلسلات نتفلكس", "series/netflix-series"),
         CatUnit("مسلسلات انمى", "series/anime-series"),
         CatUnit("مسلسلات تركى", "series/turkish-series"),
-        CatUnit("مسلسلات عربى", "series/arab-series")
+        CatUnit("مسلسلات عربى", "series/arab-series"),
     )
+    // ============================= title edit =============================
 
-    // preferred quality settings
+    private fun titleEdit(title: String, details: Boolean = false): String {
+        val movie = "فيلم"
+
+        val finalTitle = if (title.contains("مسلسل")) {
+            if (TitleRegex.SERIES_SEASONS.containsMatchIn(title)) {
+                val newTitle = TitleRegex.SERIES_SEASONS.find(title)
+                newTitle!!.groupValues[1].trim() + if (details) " (م.${newTitle.groupValues[2].trim()})(${newTitle.groupValues[3].trim()}ح)" else ""
+            } else if (TitleRegex.SERIES_EPISODES.containsMatchIn(title)) {
+                val newTitle = TitleRegex.SERIES_EPISODES.find(title)
+                newTitle!!.groupValues[1].trim() + if (details) " (${newTitle.groupValues[2].trim()}ح)" else ""
+            } else {
+                title
+            }
+        } else if (title.contains("فيلم")) {
+            if (TitleRegex.ARABIC_MOVIE.containsMatchIn(title)) {
+                // افلام عربى
+                TitleRegex.ARABIC_MOVIE.find(title)!!.groupValues[1].trim() + if (details) " ($movie)" else ""
+            } else if (TitleRegex.MOVIES.containsMatchIn(title)) {
+                TitleRegex.MOVIES.find(title)!!.groupValues[1].trim() + if (details) " (${TitleRegex.MOVIES.find(title)!!.groupValues[2].trim()})($movie)" else ""
+            } else {
+                title
+            }
+        } else if (title.contains("انمي")) {
+            Regex(if (title.contains("الموسم"))"انمي(.*)الموسم" else "انمي(.*)الحلقة").find(title)!!.groupValues[1] + if (details) " (انمى)" else ""
+        } else if (title.contains("برنامج")) {
+            Regex(if (title.contains("الموسم"))"برنامج(.*)الموسم" else "برنامج(.*)حلقة").find(title)!!.groupValues[1].removeSurrounding(" ال") + if (details) " (برنامج)" else ""
+        } else {
+            title
+        }
+        return finalTitle.trim()
+    }
+
+    object TitleRegex {
+        val MOVIES = "(?:[^a-zA-Z]+)(.*)(?:[0-9 ]+)([^a-zA-Z]+)".toRegex()
+        val ARABIC_MOVIE = "فيلم ([^a-zA-Z]+) ([0-9]+)".toRegex()
+        val SERIES_SEASONS = "مسلسل(.*)الموسم(.*)الحلقة([ 0-9]+)".toRegex()
+        val SERIES_EPISODES = "مسلسل(.*)الحلقة([ 0-9]+)".toRegex()
+        val SEASON = "الموسم(.*)".toRegex()
+        val EPISODE = "حلقة(.*)".toRegex()
+    }
+
+    // ============================ quality settings =======================
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         val videoQualityPref = ListPreference(screen.context).apply {

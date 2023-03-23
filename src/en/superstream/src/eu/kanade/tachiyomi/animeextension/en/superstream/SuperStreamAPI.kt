@@ -700,6 +700,7 @@ import java.security.MessageDigest
 import java.security.NoSuchAlgorithmException
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
+import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -721,8 +722,10 @@ class SuperStreamAPI(val json: Json) {
     private val hideNsfw = 1
 
     private val headers = Headers.headersOf(
-        "Platform", "android",
-        "Accept", "charset=utf-8"
+        "Platform",
+        "android",
+        "Accept",
+        "charset=utf-8",
     )
 
     // Random 32 length string
@@ -751,7 +754,7 @@ class SuperStreamAPI(val json: Json) {
                 cipher.init(
                     1,
                     SecretKeySpec(bArr, ALGORITHM),
-                    IvParameterSpec(iv.toByteArray())
+                    IvParameterSpec(iv.toByteArray()),
                 )
 
                 String(Base64.encode(cipher.doFinal(str.toByteArray()), 2), StandardCharsets.UTF_8)
@@ -776,7 +779,7 @@ class SuperStreamAPI(val json: Json) {
     private object HexDump {
         private val HEX_DIGITS = charArrayOf(
             '0', '1', '2', '3', '4', '5', '6', '7',
-            '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'
+            '8', '9', 'A', 'B', 'C', 'D', 'E', 'F',
         )
 
         @JvmOverloads
@@ -812,7 +815,7 @@ class SuperStreamAPI(val json: Json) {
         }
     }
 
-    private fun queryApi(query: String): Response {
+    private fun queryApi(query: String, altApi: Boolean = false): Response {
         val encryptedQuery = CipherUtils.encrypt(query, key, iv)!!
         val appKeyHash = CipherUtils.md5(appKey)!!
         val newBody =
@@ -820,10 +823,10 @@ class SuperStreamAPI(val json: Json) {
             CipherUtils.getVerify(
                 encryptedQuery,
                 appKey,
-                key
+                key,
             )
             }","encrypt_data":"$encryptedQuery"}"""
-        val base64Body = String(Base64.encode(newBody.toByteArray(), Base64.DEFAULT))
+        val base64Body = String(Base64.encode(newBody.toByteArray(), Base64.NO_WRAP))
 
         val formData: RequestBody = FormBody.Builder()
             .add("data", base64Body)
@@ -834,14 +837,15 @@ class SuperStreamAPI(val json: Json) {
             .add("medium", "Website&token$token")
             .build()
         try {
-            return client.newCall(POST(apiUrl, headers = headers, body = formData)).execute()
+            val url = if (altApi) secondApiUrl else thirdApiUrl
+            return client.newCall(POST(url, headers = headers, body = formData)).execute()
         } catch (e: Exception) {
-            throw Exception("Query Failed $e")
+            throw Exception("Query Failed\n$e")
         }
     }
 
-    private inline fun <reified T : Any> queryApiParsed(query: String): T {
-        return parseJson(queryApi(query).body!!.string())
+    private inline fun <reified T : Any> queryApiParsed(query: String, altApi: Boolean = false): T {
+        return parseJson(queryApi(query, altApi).body.string())
     }
 
     private val unixTime: Long
@@ -862,14 +866,16 @@ class SuperStreamAPI(val json: Json) {
     private val key = base64Decode("MTIzZDZjZWRmNjI2ZHk1NDIzM2FhMXc2")
     private val ip = base64Decode("aHR0cHM6Ly8xNTIuMzIuMTQ5LjE2MA==")
     val apiUrl = "$ip${base64Decode("L2FwaS9hcGlfY2xpZW50L2luZGV4Lw==")}"
+
+    // Thanks @Blatzar and his dream from cloudstream for the secondurl
+    private val secondApiUrl =
+        base64Decode("aHR0cHM6Ly9tYnBhcGkuc2hlZ3UubmV0L2FwaS9hcGlfY2xpZW50L2luZGV4Lw==")
+    private val thirdApiUrl = base64Decode("aHR0cHM6Ly9zaG93Ym94LnNoZWd1Lm5ldC9hcGkvYXBpX2NsaWVudC9pbmRleC8=")
     private val appKey = base64Decode("bW92aWVib3g=")
     private val appId = base64Decode("Y29tLnRkby5zaG93Ym94")
 
     fun getMainPage(page: Int): AnimesPage {
-        val json = queryApi(
-            """{"childmode":"$hideNsfw","app_version":"11.5","appid":"$appId","module":"Home_list_type_v2","channel":"Website","page":"$page","lang":"en","type":"all","pagelimit":"10","expired_date":"${getExpiryDate()}","platform":"android"}
-            """.trimIndent()
-        ).body!!.string()
+        val json = sendQuery(page)
         val animes = mutableListOf<SAnime>()
 
         // Cut off the first row (featured)
@@ -881,11 +887,36 @@ class SuperStreamAPI(val json: Json) {
                             url = LoadData(post.id ?: return@mapNotNull null, post.box_type).toJson()
                             thumbnail_url = post.poster ?: post.poster_2
                             title = post.title ?: return@second null
-                        }
+                        },
                     )
                 }
             }
         return AnimesPage(animes, animes.isNotEmpty())
+    }
+
+    fun getLatest(page: Int): AnimesPage {
+        val json = sendQuery(page)
+        val animes = mutableListOf<SAnime>()
+
+        parseJson<DataJSON>(json).data.let { it.filter { item -> item.type == "newupload" || item.type == "newupdate" } }
+            .mapNotNull {
+                it.list.mapNotNull second@{ post ->
+                    animes.add(
+                        SAnime.create().apply {
+                            url = LoadData(post.id ?: return@mapNotNull null, post.box_type).toJson()
+                            thumbnail_url = post.poster ?: post.poster_2
+                            title = post.title ?: return@second null
+                        },
+                    )
+                }
+            }
+        return AnimesPage(animes, animes.isNotEmpty())
+    }
+
+    private fun sendQuery(page: Int): String {
+        return queryApi(
+            """{"childmode":"$hideNsfw","app_version":"11.5","appid":"$appId","module":"Home_list_type_v2","channel":"Website","page":"$page","lang":"en","type":"all","pagelimit":"20","expired_date":"${getExpiryDate()}","platform":"android"}""".trimIndent(),
+        ).body.string()
     }
 
     private fun Data.toSearchResponse(): SAnime? {
@@ -898,7 +929,7 @@ class SuperStreamAPI(val json: Json) {
                     ?: it.mid?.let { id ->
                         LoadData(
                             id,
-                            TYPE_MOVIES
+                            TYPE_MOVIES,
                         )
                     } ?: it.tid?.let { id -> LoadData(id, TYPE_SERIES) }
                 )?.toJson() ?: return null
@@ -906,17 +937,16 @@ class SuperStreamAPI(val json: Json) {
     }
 
     fun search(page: Int, query: String): List<SAnime> {
-
         val apiQuery =
             // Originally 8 pagelimit
             """{"childmode":"$hideNsfw","app_version":"11.5","appid":"$appId","module":"Search3","channel":"Website","page":"$page","lang":"en","type":"all","keyword":"$query","pagelimit":"20","expired_date":"${getExpiryDate()}","platform":"android"}"""
-        val searchResponse = parseJson<MainData>(queryApi(apiQuery).body!!.string()).data.mapNotNull {
+        val searchResponse = parseJson<MainData>(queryApi(apiQuery, true).body.string()).data.mapNotNull {
             it.toSearchResponse()
         }
         return searchResponse
     }
 
-    fun load(url: String): Pair<MovieData?, Pair<SeriesData?, List<SeriesEpisode>?>> {
+    fun load(url: String, altApi: Boolean = false): Pair<MovieData?, Pair<SeriesData?, List<SeriesEpisode>?>> {
         val loadData = parseJson<LoadData>(url)
         // val module = if(type === "TvType.Movie") "Movie_detail" else "*tv series module*"
 
@@ -925,14 +955,14 @@ class SuperStreamAPI(val json: Json) {
         if (isMovie) { // 1 = Movie
             val apiQuery =
                 """{"childmode":"$hideNsfw","uid":"","app_version":"11.5","appid":"$appId","module":"Movie_detail","channel":"Website","mid":"${loadData.id}","lang":"en","expired_date":"${getExpiryDate()}","platform":"android","oss":"","group":""}"""
-            val data = (queryApiParsed<MovieDataProp>(apiQuery)).data
+            val data = (queryApiParsed<MovieDataProp>(apiQuery, altApi)).data
                 ?: throw RuntimeException("API error")
 
             return Pair(data, Pair(null, null))
         } else { // 2 Series
             val apiQuery =
                 """{"childmode":"$hideNsfw","uid":"","app_version":"11.5","appid":"$appId","module":"TV_detail_1","display_all":"1","channel":"Website","lang":"en","expired_date":"${getExpiryDate()}","platform":"android","tid":"${loadData.id}"}"""
-            val data = (queryApiParsed<SeriesDataProp>(apiQuery)).data
+            val data = (queryApiParsed<SeriesDataProp>(apiQuery, altApi)).data
                 ?: throw RuntimeException("API error")
 
             val episodes = data.season.mapNotNull {
@@ -983,15 +1013,15 @@ class SuperStreamAPI(val json: Json) {
                         subsList.add(
                             Track(
                                 sub.file_path,
-                                (sub.language ?: sub.lang ?: "Sub") + " ${index + 1} (${sub.point!!.jsonPrimitive.content})"
-                            )
+                                (sub.language ?: sub.lang ?: "Sub") + " ${index + 1} (${sub.point!!.jsonPrimitive.content})",
+                            ),
                         )
                     }
                 }
             }
-        } catch (e: Error) {}
+        } catch (_: Error) {}
 
-        linkData.data!!.list.forEach {
+        linkData.data.list.forEach {
             if (it.path.isNullOrBlank().not()) {
                 val videoUrl = it.path?.replace("\\/", "") ?: ""
                 try {
@@ -1001,8 +1031,8 @@ class SuperStreamAPI(val json: Json) {
                             (it.quality ?: it.real_quality ?: "quality") + " ${it.size}",
                             videoUrl,
                             subtitleTracks = subsList,
-                            headers = headers
-                        )
+                            headers = headers,
+                        ),
                     )
                 } catch (e: Error) {
                     videoList.add(
@@ -1010,8 +1040,8 @@ class SuperStreamAPI(val json: Json) {
                             videoUrl,
                             (it.quality ?: it.real_quality ?: "quality") + " ${it.size}",
                             videoUrl,
-                            headers = headers
-                        )
+                            headers = headers,
+                        ),
                     )
                 }
             }
@@ -1043,7 +1073,6 @@ class SuperStreamAPI(val json: Json) {
 
 private fun configureToIgnoreCertificate(): OkHttpClient {
     try {
-
         // Create a trust manager that does not validate certificate chains
         val trustAllCerts: Array<TrustManager> = arrayOf(
             @SuppressLint("CustomX509TrustManager")
@@ -1058,7 +1087,7 @@ private fun configureToIgnoreCertificate(): OkHttpClient {
                 override fun getAcceptedIssuers(): Array<X509Certificate> {
                     return arrayOf()
                 }
-            }
+            },
         )
 
         // Install the all-trusting trust manager
@@ -1069,6 +1098,7 @@ private fun configureToIgnoreCertificate(): OkHttpClient {
         return OkHttpClient.Builder()
             .sslSocketFactory(sslSocketFactory, trustAllCerts[0] as X509TrustManager)
             .hostnameVerifier { _, _ -> true }
+            .readTimeout(70, TimeUnit.SECONDS)
             .build()
     } catch (e: Exception) {
         throw Exception("Exception while configuring IgnoreSslCertificate: $e")
