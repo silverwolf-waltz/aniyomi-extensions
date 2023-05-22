@@ -19,7 +19,6 @@ import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.asObservableSuccess
 import eu.kanade.tachiyomi.util.asJsoup
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
@@ -65,13 +64,16 @@ class BetterAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         .add("Accept-Language", ACCEPT_LANGUAGE)
 
     // ============================== Popular ===============================
-    // The site doesn't have a popular anime tab, so we use the latest anime page instead.
-    override fun fetchPopularAnime(page: Int) = super.fetchLatestUpdates(page)
+    // The site doesn't have a true popular anime tab,
+    // so we use the latest added anime page instead.
+    override fun popularAnimeSelector() = latestUpdatesSelector()
 
-    override fun popularAnimeSelector() = throw Exception("not used")
-    override fun popularAnimeFromElement(element: Element) = throw Exception("not used")
-    override fun popularAnimeRequest(page: Int) = throw Exception("not used")
-    override fun popularAnimeNextPageSelector() = null
+    override fun popularAnimeFromElement(element: Element) = latestUpdatesFromElement(element)
+
+    override fun popularAnimeRequest(page: Int): Request =
+        GET("$baseUrl/ultimosAdicionados?page=$page")
+
+    override fun popularAnimeNextPageSelector() = latestUpdatesNextPageSelector()
 
     // ============================== Episodes ==============================
     override fun episodeListSelector(): String = "ul#episodesList > li.list-group-item-action > a"
@@ -84,9 +86,7 @@ class BetterAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
             val episodeName = element.text()
             setUrlWithoutDomain(element.attr("href"))
             name = episodeName
-            episode_number = runCatching {
-                episodeName.substringAfterLast(" ").toFloat()
-            }.getOrDefault(0F)
+            episode_number = episodeName.substringAfterLast(" ").toFloatOrNull() ?: 0F
         }
     }
 
@@ -213,8 +213,8 @@ class BetterAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         val videoQualityPref = ListPreference(screen.context).apply {
             key = PREF_QUALITY_KEY
             title = PREF_QUALITY_TITLE
-            entries = PREF_QUALITY_VALUES
-            entryValues = PREF_QUALITY_VALUES
+            entries = PREF_QUALITY_ENTRIES
+            entryValues = PREF_QUALITY_ENTRIES
             setDefaultValue(PREF_QUALITY_DEFAULT)
             summary = "%s"
             setOnPreferenceChangeListener { _, newValue ->
@@ -227,7 +227,7 @@ class BetterAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         screen.addPreference(videoQualityPref)
     }
 
-    override fun getFilterList(): AnimeFilterList = BAFilters.filterList
+    override fun getFilterList(): AnimeFilterList = BAFilters.FILTER_LIST
 
     // ============================= Utilities ==============================
     private fun loginInterceptor(chain: Interceptor.Chain): Response {
@@ -255,32 +255,32 @@ class BetterAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         }
     }
 
-    private var INITIAL_DATA: String = ""
-    private var WIRE_TOKEN: String = ""
+    private var initialData: String = ""
+    private var wireToken: String = ""
 
     private fun updateInitialData(request: Request) {
         val document = client.newCall(request).execute().asJsoup()
         val wireElement = document.selectFirst("[wire:id]")
-        WIRE_TOKEN = document.html()
+        wireToken = document.html()
             .substringAfter("livewire_token")
             .substringAfter("'")
             .substringBefore("'")
-        INITIAL_DATA = wireElement!!.attr("wire:initial-data").dropLast(1)
+        initialData = wireElement!!.attr("wire:initial-data").dropLast(1)
     }
 
     private fun wireRequest(path: String, updates: List<PayloadItem>): Request {
-        if (WIRE_TOKEN.isBlank()) {
+        if (wireToken.isBlank()) {
             updateInitialData(GET("$baseUrl/pesquisa"))
         }
 
         val url = "$baseUrl/livewire/message/$path"
         val items = updates.joinToString(",") { json.encodeToString(it) }
-        val data = "$INITIAL_DATA, \"updates\": [$items]}"
+        val data = "$initialData, \"updates\": [$items]}"
         val reqBody = data.toRequestBody("application/json".toMediaType())
 
         val headers = headersBuilder()
             .add("x-livewire", "true")
-            .add("x-csrf-token", WIRE_TOKEN)
+            .add("x-csrf-token", wireToken)
             .build()
         return POST(url, headers, reqBody)
     }
@@ -291,7 +291,7 @@ class BetterAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
             ?.trim()
     }
 
-    private inline fun String.toPayloadData(name: String): PayloadData? {
+    private fun String.toPayloadData(name: String): PayloadData? {
         return when {
             isNotBlank() -> PayloadData(name = name, value = listOf(this))
             else -> null
@@ -315,6 +315,6 @@ class BetterAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         private const val PREF_QUALITY_KEY = "preferred_quality"
         private const val PREF_QUALITY_TITLE = "Qualidade preferida"
         private const val PREF_QUALITY_DEFAULT = "720p"
-        private val PREF_QUALITY_VALUES = arrayOf("480p", "720p", "1080p")
+        private val PREF_QUALITY_ENTRIES = arrayOf("480p", "720p", "1080p")
     }
 }

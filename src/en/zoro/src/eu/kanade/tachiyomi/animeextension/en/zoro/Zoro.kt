@@ -22,7 +22,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
@@ -47,7 +46,7 @@ class Zoro : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override val name = "zoro.to (experimental)"
 
-    override val baseUrl = "https://zoro.to"
+    override val baseUrl by lazy { preferences.getString(PREF_DOMAIN_KEY, PREF_DOMAIN_DEFAULT)!! }
 
     override val lang = "en"
 
@@ -290,7 +289,7 @@ class Zoro : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         return GET(url.build().toString())
     }
 
-    override fun getFilterList(): AnimeFilterList = ZoroFilters.filterList
+    override fun getFilterList(): AnimeFilterList = ZoroFilters.FILTER_LIST
 
     // =========================== Anime Details ============================
     override fun animeDetailsParse(document: Document): SAnime {
@@ -325,6 +324,21 @@ class Zoro : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     // ============================== Settings ==============================
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        val domainPref = ListPreference(screen.context).apply {
+            key = PREF_DOMAIN_KEY
+            title = PREF_DOMAIN_TITLE
+            entries = PREF_DOMAIN_ENTRIES
+            entryValues = PREF_DOMAIN_ENTRY_VALUES
+            setDefaultValue(PREF_DOMAIN_DEFAULT)
+            summary = "%s"
+
+            setOnPreferenceChangeListener { _, newValue ->
+                val selected = newValue as String
+                val index = findIndexOfValue(selected)
+                val entry = entryValues[index] as String
+                preferences.edit().putString(key, entry).commit()
+            }
+        }
         val videoQualityPref = ListPreference(screen.context).apply {
             key = PREF_QUALITY_KEY
             title = PREF_QUALITY_TITLE
@@ -372,6 +386,7 @@ class Zoro : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
                 preferences.edit().putString(key, entry).commit()
             }
         }
+        screen.addPreference(domainPref)
         screen.addPreference(videoQualityPref)
         screen.addPreference(epTypePref)
         screen.addPreference(subLangPref)
@@ -423,6 +438,12 @@ class Zoro : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         private const val PREF_TYPE_KEY = "preferred_type"
         private const val PREF_TYPE_TITLE = "Preferred episode type/mode"
         private val PREF_TYPE_ENTRIES = arrayOf("sub", "dub")
+
+        private const val PREF_DOMAIN_KEY = "preferred_domain"
+        private const val PREF_DOMAIN_TITLE = "Preferred domain (requires app restart)"
+        private const val PREF_DOMAIN_DEFAULT = "https://zoro.to"
+        private val PREF_DOMAIN_ENTRIES = arrayOf("zoro.to", "zoro.moe", "zoro.sx", "zoro.pm", "sanji.to")
+        private val PREF_DOMAIN_ENTRY_VALUES = arrayOf("https://zoro.to", "https://zoro.moe", "https://zoro.sx", "https://zoro.pm", "https://sanji.to")
 
         private const val PREF_SUB_KEY = "preferred_subLang"
         private const val PREF_SUB_TITLE = "Preferred sub language"

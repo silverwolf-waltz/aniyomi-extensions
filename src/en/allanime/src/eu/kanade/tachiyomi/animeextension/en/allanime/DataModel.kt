@@ -25,6 +25,7 @@ data class PopularResult(
                     val thumbnail: String,
                     val englishName: String? = null,
                     val nativeName: String? = null,
+                    val slugTime: String? = null,
                 )
             }
         }
@@ -50,6 +51,35 @@ data class SearchResult(
                 val thumbnail: String,
                 val englishName: String? = null,
                 val nativeName: String? = null,
+                val slugTime: String? = null,
+            )
+        }
+    }
+}
+
+@Serializable
+data class DetailsResult(
+    val data: DataShow,
+) {
+    @Serializable
+    data class DataShow(
+        val show: SeriesShows,
+    ) {
+        @Serializable
+        data class SeriesShows(
+            val thumbnail: String,
+            val genres: List<String>? = null,
+            val studios: List<String>? = null,
+            val season: AirSeason? = null,
+            val status: String? = null,
+            val score: Float? = null,
+            val type: String? = null,
+            val description: String? = null,
+        ) {
+            @Serializable
+            data class AirSeason(
+                val quarter: String,
+                val year: Int,
             )
         }
     }
@@ -66,27 +96,12 @@ data class SeriesResult(
         @Serializable
         data class SeriesShows(
             val _id: String,
-            val name: String,
-            val thumbnail: String,
-            val genres: List<String>? = null,
-            val studios: List<String>? = null,
-            val season: AirSeason? = null,
-            val status: String? = null,
-            val score: Float? = null,
-            val type: String? = null,
-            val description: String? = null,
             val availableEpisodesDetail: AvailableEps,
         ) {
             @Serializable
             data class AvailableEps(
                 val sub: List<String>? = null,
                 val dub: List<String>? = null,
-            )
-
-            @Serializable
-            data class AirSeason(
-                val quarter: String,
-                val year: Int,
             )
         }
     }

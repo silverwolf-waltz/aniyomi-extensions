@@ -127,7 +127,7 @@ class NineAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
 
     override fun searchAnimeNextPageSelector(): String = popularAnimeNextPageSelector()
 
-    override fun getFilterList(): AnimeFilterList = NineAnimeFilters.filterList
+    override fun getFilterList(): AnimeFilterList = NineAnimeFilters.FILTER_LIST
 
     // =========================== Anime Details ============================
 
@@ -297,8 +297,8 @@ class NineAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
                     }
                 "streamtape" -> StreamTapeExtractor(client)
                     .videoFromUrl(embedLink, "StreamTape - ${server.first}")?.let {
-                        videoList.add(it)
-                    }
+                    videoList.add(it)
+                }
                 "mp4upload" -> Mp4uploadExtractor(client)
                     .videoFromUrl(embedLink, "Mp4Upload - ${server.first}").let {
                         videoList.addAll(it)
@@ -387,8 +387,8 @@ class NineAnime : ConfigurableAnimeSource, ParsedAnimeHttpSource() {
         val domainPref = ListPreference(screen.context).apply {
             key = "preferred_domain"
             title = "Preferred domain (requires app restart)"
-            entries = arrayOf("9anime.to", "9anime.gs", "9anime.pl", "9anime.id")
-            entryValues = arrayOf("https://9anime.to", "https://9anime.gs", "https://9anime.pl", "https://9anime.id")
+            entries = arrayOf("9anime.to", "9anime.gs", "9anime.pl", "9animehq.to")
+            entryValues = arrayOf("https://9anime.to", "https://9anime.gs", "https://9anime.pl", "https://9animehq.to")
             setDefaultValue("https://9anime.to")
             summary = "%s"
 

@@ -78,7 +78,7 @@ interface ThemeSourceGenerator {
                 |    pkgNameSuffix = '${pkgNameSuffix(source, ".")}'
                 |    extClass = '.${source.className}'
                 |    extFactory = '$themePkg'
-                |    extVersionCode = ${baseVersionCode + source.overrideVersionCode + multisrcLibraryVersion}
+                |    extVersionCode = ${baseVersionCode + source.overrideVersionCode + MULTISRC_LIBRARY_VERSION}
                 |    ${if (source.isNsfw) "containsNsfw = true\n" else ""}
                 |}
                 |$defaultAdditionalGradleText
@@ -108,7 +108,7 @@ interface ThemeSourceGenerator {
                     """
                     |<?xml version="1.0" encoding="utf-8"?>
                     |<!-- THIS FILE IS AUTO-GENERATED; DO NOT EDIT -->
-                    |<manifest package="eu.kanade.tachiyomi.animeextension" />
+                    |<manifest />
                     """.trimMargin(),
                 )
             }
@@ -166,6 +166,7 @@ interface ThemeSourceGenerator {
 
         private fun copyThemeClasses(userDir: String, themePkg: String, projectRootPath: String) {
             val themeSrcPath = "$userDir/multisrc/src/main/java/${themeSuffix(themePkg, "/")}"
+                .replace("/", File.separator)
 
             val themeDestPath = "$projectRootPath/src/${themeSuffix(themePkg, "/")}"
             File(themeDestPath).mkdirs()
@@ -301,4 +302,4 @@ sealed class ThemeSourceData {
 /**
  * This variable should be increased when the multisrc library changes in a way that prompts global extension upgrade
  */
-const val multisrcLibraryVersion = 0
+const val MULTISRC_LIBRARY_VERSION = 0

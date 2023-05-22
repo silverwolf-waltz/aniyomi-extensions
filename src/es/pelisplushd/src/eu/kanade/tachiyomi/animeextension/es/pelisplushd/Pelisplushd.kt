@@ -158,23 +158,11 @@ open class Pelisplushd(override val name: String, override val baseUrl: String) 
         return String(hexChars)
     }
 
-    public fun fixUrl(url: String): String {
-        val sbUrl = url.substringBefore("/e/")
-        val id = url.substringAfter("/e/").substringBefore("?").substringBefore(".html")
-        val hexBytes = bytesToHex(id.toByteArray())
-        return "$sbUrl/sources51/33436f7a4d3656496f4973597c7c${hexBytes}7c7c6877624978704c39796936737c7c73747265616d7362"
-    }
-
-    public fun serverVideoResolver(url: String, server: String): List<Video>? {
+    private fun serverVideoResolver(url: String, server: String): List<Video>? {
         val videoList = mutableListOf<Video>()
         try {
             if (server.lowercase() == "sbfast") {
-                val newHeaders = headers.newBuilder()
-                    .set("referer", url)
-                    .set("watchsb", "sbstream")
-                    .set("authority", url.substringBefore("/e/").substringAfter("https://"))
-                    .build()
-                return StreamSBExtractor(client).videosFromDecryptedUrl(fixUrl(url), headers = newHeaders)
+                return StreamSBExtractor(client).videosFromUrl(url, headers)
             } else if (server.lowercase() == "plusto") {
                 return FembedExtractor(client).videosFromUrl(url)
             } else if (server.lowercase() == "stp") {
@@ -183,7 +171,7 @@ open class Pelisplushd(override val name: String, override val baseUrl: String) 
                 if (!url.contains("disable")) {
                     val body = client.newCall(GET(url)).execute().asJsoup()
                     if (body.select("script:containsData(var shareId)").toString()
-                        .isNotBlank()
+                            .isNotBlank()
                     ) {
                         val shareId =
                             body.selectFirst("script:containsData(var shareId)")!!.data()
@@ -238,7 +226,7 @@ open class Pelisplushd(override val name: String, override val baseUrl: String) 
         }
     }
 
-    private fun getNumberFromString(epsStr: String): String {
+    fun getNumberFromString(epsStr: String): String {
         return epsStr.filter { it.isDigit() }.ifEmpty { "0" }
     }
 

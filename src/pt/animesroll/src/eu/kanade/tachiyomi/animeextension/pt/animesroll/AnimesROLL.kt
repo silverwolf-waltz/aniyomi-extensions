@@ -1,9 +1,10 @@
 package eu.kanade.tachiyomi.animeextension.pt.animesroll
 
 import eu.kanade.tachiyomi.animeextension.pt.animesroll.dto.AnimeDataDto
-import eu.kanade.tachiyomi.animeextension.pt.animesroll.dto.AnimeInfoDto
 import eu.kanade.tachiyomi.animeextension.pt.animesroll.dto.EpisodeDto
+import eu.kanade.tachiyomi.animeextension.pt.animesroll.dto.EpisodeListDto
 import eu.kanade.tachiyomi.animeextension.pt.animesroll.dto.LatestAnimeDto
+import eu.kanade.tachiyomi.animeextension.pt.animesroll.dto.MovieInfoDto
 import eu.kanade.tachiyomi.animeextension.pt.animesroll.dto.PagePropDto
 import eu.kanade.tachiyomi.animeextension.pt.animesroll.dto.SearchResultsDto
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
@@ -17,7 +18,6 @@ import eu.kanade.tachiyomi.network.asObservableSuccess
 import eu.kanade.tachiyomi.util.asJsoup
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
-import okhttp3.Headers
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Document
@@ -33,7 +33,7 @@ class AnimesROLL : AnimeHttpSource() {
 
     override val supportsLatest = true
 
-    override fun headersBuilder() = Headers.Builder().add("Referer", baseUrl)
+    override fun headersBuilder() = super.headersBuilder().add("Referer", baseUrl)
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -49,29 +49,45 @@ class AnimesROLL : AnimeHttpSource() {
     override fun episodeListParse(response: Response): List<SEpisode> {
         val originalUrl = response.request.url.toString()
         return if ("/f/" in originalUrl) {
-            val od = response.asJsoup().parseAs<AnimeInfoDto>().animeData.od
-            val episode = SEpisode.create().apply {
-                url = "$NEW_API_URL/od/$od/filme.mp4"
+            val od = response.asJsoup().parseAs<MovieInfoDto>().movieData.od
+            SEpisode.create().apply {
+                url = "$OLD_API_URL/od/$od/filme.mp4"
                 name = "Filme"
                 episode_number = 0F
-            }
-            listOf(episode)
+            }.let(::listOf)
         } else {
-            val epdata = response.asJsoup().parseAs<EpisodeDto>()
-            val urlStart = "https://cdn-01.animesroll.com/hls/animes/${epdata.anime.slug}"
+            val anime = response.asJsoup().parseAs<AnimeDataDto>()
+            val urlStart = "https://cdn-01.gamabunta.xyz/hls/animes/${anime.slug}"
 
-            (epdata.total_ep downTo 1).map {
+            return fetchEpisodesRecursively(anime.id).map { episode ->
                 SEpisode.create().apply {
-                    episode_number = it.toFloat()
-                    val fixedNum = it.toString().padStart(3, '0')
-                    name = "Episódio #$fixedNum"
-                    url = "$urlStart/$fixedNum.mp4/media-1/stream.m3u8"
+                    val epNum = episode.episodeNumber
+                    name = "Episódio #$epNum"
+                    episode_number = epNum.toFloat()
+                    url = "$urlStart/$epNum.mp4/media-1/stream.m3u8"
                 }
             }
         }
     }
-    // ============================ Video Links =============================
 
+    private fun fetchEpisodesRecursively(animeId: String, page: Int = 1): List<EpisodeDto> {
+        val response = client.newCall(episodeListRequest(animeId, page))
+            .execute()
+            .parseAs<EpisodeListDto>()
+
+        return response.episodes.let { episodes ->
+            when {
+                response.meta.totalOfPages > page ->
+                    episodes + fetchEpisodesRecursively(animeId, page + 1)
+                else -> episodes
+            }
+        }
+    }
+
+    private fun episodeListRequest(animeId: String, page: Int) =
+        GET("$NEW_API_URL/animes/$animeId/episodes?page=$page%order=desc")
+
+    // ============================ Video Links =============================
     override fun fetchVideoList(episode: SEpisode): Observable<List<Video>> {
         val epUrl = episode.url
         return Observable.just(listOf(Video(epUrl, "default", epUrl)))
@@ -88,7 +104,11 @@ class AnimesROLL : AnimeHttpSource() {
     // =========================== Anime Details ============================
     override fun animeDetailsParse(response: Response): SAnime {
         val doc = response.asJsoup()
-        val anime = doc.parseAs<AnimeInfoDto>().animeData
+        val anime = when {
+            response.request.url.toString().contains("/f/") ->
+                doc.parseAs<MovieInfoDto>().movieData
+            else -> doc.parseAs<AnimeDataDto>()
+        }
         return anime.toSAnime().apply {
             author = if (anime.director != "0") anime.director else null
             var desc = anime.description.ifNotEmpty { it + "\n" }
@@ -129,13 +149,13 @@ class AnimesROLL : AnimeHttpSource() {
     }
 
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList): Request {
-        return GET("$NEW_API_URL/search?q=$query")
+        return GET("$OLD_API_URL/search?q=$query")
     }
 
     // =============================== Latest ===============================
     override fun latestUpdatesParse(response: Response): AnimesPage {
         val parsed = response.asJsoup().parseAs<LatestAnimeDto>()
-        val animes = parsed.animes.map { it.toSAnime() }
+        val animes = parsed.episodes.map { it.episode.anime!!.toSAnime() }
         return AnimesPage(animes, false)
     }
 
@@ -176,7 +196,8 @@ class AnimesROLL : AnimeHttpSource() {
     }
 
     companion object {
-        private const val NEW_API_URL = "https://apiv2-prd.anroll.net"
+        private const val OLD_API_URL = "https://apiv2-prd.anroll.net"
+        private const val NEW_API_URL = "https://apiv3-prd.anroll.net"
 
         const val PREFIX_SEARCH = "path:"
     }
